@@ -475,12 +475,19 @@ func uniqueTargets(targets endpoint.Targets) endpoint.Targets {
 
 // gwProtocolMatches returns whether a and b are the same protocol,
 // where HTTP and HTTPS are considered the same.
+// TCP and TLS also considered the same for TLS termination at the gateway.
 func gwProtocolMatches(a, b v1beta1.ProtocolType) bool {
 	if a == v1beta1.HTTPSProtocolType {
 		a = v1beta1.HTTPProtocolType
 	}
 	if b == v1beta1.HTTPSProtocolType {
 		b = v1beta1.HTTPProtocolType
+	}
+	if a == v1beta1.TLSProtocolType {
+		a = v1beta1.TCPProtocolType
+	}
+	if b == v1beta1.TLSProtocolType {
+		b = v1beta1.TCPProtocolType
 	}
 	return a == b
 }

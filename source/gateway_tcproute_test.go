@@ -94,6 +94,70 @@ func TestGatewayTCPRouteSourceEndpoints(t *testing.T) {
 	})
 }
 
+func TestGatewayTLSTerminationTCPRouteSourceEndpoints(t *testing.T) {
+	t.Parallel()
+
+	gwClient := gatewayfake.NewSimpleClientset()
+	kubeClient := kubefake.NewSimpleClientset()
+	clients := new(MockClientGenerator)
+	clients.On("GatewayClient").Return(gwClient, nil)
+	clients.On("KubeClient").Return(kubeClient, nil)
+
+	ctx := context.Background()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "default",
+		},
+	}
+	_, err := kubeClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	require.NoError(t, err, "failed to create Namespace")
+
+	ips := []string{"10.64.0.1", "10.64.0.2"}
+	gw := &v1beta1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "internal",
+			Namespace: "default",
+		},
+		Spec: v1beta1.GatewaySpec{
+			Listeners: []v1beta1.Listener{{
+				Protocol: v1beta1.TLSProtocolType,
+			}},
+		},
+		Status: gatewayStatus(ips...),
+	}
+	_, err = gwClient.GatewayV1beta1().Gateways(gw.Namespace).Create(ctx, gw, metav1.CreateOptions{})
+	require.NoError(t, err, "failed to create Gateway")
+
+	rt := &v1alpha2.TCPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api",
+			Namespace: "default",
+			Annotations: map[string]string{
+				hostnameAnnotationKey: "api-annotation.foobar.internal",
+			},
+		},
+		Spec: v1alpha2.TCPRouteSpec{},
+		Status: v1alpha2.TCPRouteStatus{
+			RouteStatus: v1a2RouteStatus(v1a2ParentRef("default", "internal")),
+		},
+	}
+	_, err = gwClient.GatewayV1alpha2().TCPRoutes(rt.Namespace).Create(ctx, rt, metav1.CreateOptions{})
+	require.NoError(t, err, "failed to create TCPRoute")
+
+	src, err := NewGatewayTCPRouteSource(clients, &Config{
+		FQDNTemplate:             "{{.Name}}-template.foobar.internal",
+		CombineFQDNAndAnnotation: true,
+	})
+	require.NoError(t, err, "failed to create Gateway TCPRoute Source")
+
+	endpoints, err := src.Endpoints(ctx)
+	require.NoError(t, err, "failed to get Endpoints")
+	validateEndpoints(t, endpoints, []*endpoint.Endpoint{
+		newTestEndpoint("api-annotation.foobar.internal", "A", ips...),
+		newTestEndpoint("api-template.foobar.internal", "A", ips...),
+	})
+}
+
 func v1a2ParentRef(namespace, name string) v1alpha2.ParentReference {
 	group := v1alpha2.Group("gateway.networking.k8s.io")
 	kind := v1alpha2.Kind("Gateway")
